@@ -3,10 +3,27 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Kijani-AI Precision Scout</title>
+    <title>Kijani-AI Precision Scout V4.0</title>
     
     <!-- Load Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Firebase Imports -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, addDoc, onSnapshot, collection, query, serverTimestamp, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Global variables MUST be accessed via the window object
+        window.firebaseImports = { 
+            initializeApp, getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, signOut,
+            getFirestore, doc, addDoc, onSnapshot, collection, query, serverTimestamp, setLogLevel
+        };
+        
+        // Ensure firebase logging is set for debugging
+        window.firebaseImports.setLogLevel('Debug');
+    </script>
+
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
         body {
@@ -17,48 +34,48 @@
             align-items: flex-start; 
             min-height: 100vh;
         }
-        /* Custom styling for security lock and loading */
-        .lock-screen {
-            z-index: 1000;
-            backdrop-filter: blur(5px);
-        }
-        .diagnosis-button-ready {
-            background-color: #10b981; /* Green */
-        }
-        .diagnosis-button-waiting {
-            background-color: #f59e0b; /* Amber/Yellow */
-        }
+        .lock-screen { z-index: 1000; backdrop-filter: blur(5px); }
+        .diagnosis-button-ready { background-color: #10b981; }
+        .diagnosis-button-waiting { background-color: #f59e0b; }
         
         /* Markdown rendering styles */
-        #diagnosisOutput h3 {
-            font-size: 1.125rem; /* text-xl */
-            font-weight: 700; /* font-bold */
-            color: #047857; /* green-700 */
+        #diagnosisOutput h3, .history-item h3 {
+            font-size: 1.125rem;
+            font-weight: 700;
+            color: #047857; 
             margin-top: 1.5rem;
             padding-bottom: 0.25rem;
-            border-bottom: 1px solid #d1d5db; /* gray-300 */
+            border-bottom: 1px solid #d1d5db;
         }
-        #diagnosisOutput p {
+        #diagnosisOutput p, .history-item p {
             margin-top: 0.5rem;
             margin-bottom: 0.5rem;
-            color: #374151; /* gray-700 */
+            color: #374151; 
             line-height: 1.5;
         }
-        #diagnosisOutput ul {
+        #diagnosisOutput ul, .history-item ul {
             list-style: disc;
             margin-left: 1.5rem;
             padding-left: 0.5rem;
             margin-top: 0.5rem;
         }
-        #diagnosisOutput li {
+        #diagnosisOutput li, .history-item li {
             margin-bottom: 0.25rem;
-            color: #374151; /* gray-700 */
+            color: #374151;
+        }
+        .history-item {
+            cursor: pointer;
+            transition: transform 0.1s, box-shadow 0.1s;
+        }
+        .history-item:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.06);
         }
     </style>
 </head>
 <body>
 
-    <!-- Security PIN Lock Screen (Biosecurity) -->
+    <!-- Security PIN/Biometric Lock Screen (Biosecurity) -->
     <div id="lockScreen" class="lock-screen fixed inset-0 flex items-center justify-center bg-gray-900 bg-opacity-90 transition-opacity duration-300">
         <div class="bg-white p-8 rounded-xl shadow-2xl w-full max-w-sm text-center mx-4">
             <svg class="w-12 h-12 text-green-500 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
@@ -68,6 +85,10 @@
             <button onclick="handlePinAction()" id="pinButton" class="mt-6 w-full px-4 py-3 bg-green-500 text-white font-semibold rounded-lg shadow-md hover:bg-green-600 transition duration-150">
                 Set PIN
             </button>
+            <button onclick="attemptBiometricUnlock()" id="biometricButton" class="mt-4 w-full px-4 py-3 bg-blue-500 text-white font-semibold rounded-lg shadow-md hover:bg-blue-600 transition duration-150 hidden">
+                <svg class="w-6 h-6 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 11c0 3.517-1.009 6.799-2.753 9.385l-1.378-1.015a1 1 0 00-1.385 0L4.753 20.385C3.009 17.799 2 14.517 2 11c0-4.418 4.03-8 9-8s9 3.582 9 8-4.03 8-9 8z"></path><circle cx="12" cy="11" r="1.5"></circle></svg>
+                Use Biometrics
+            </button>
             <p id="pinStatus" class="text-sm text-red-500 mt-4"></p>
         </div>
     </div>
@@ -75,146 +96,176 @@
     <!-- Main Application UI -->
     <div id="app" class="min-h-screen flex flex-col items-center p-4 w-full max-w-lg opacity-0 transition-opacity duration-500">
 
-        <!-- Header -->
-        <header class="w-full max-w-lg mb-4 bg-white shadow-lg rounded-xl p-4 flex justify-between items-center border-b-4 border-green-400">
-            <h1 class="text-xl font-extrabold text-green-700 leading-tight">
-                Kijani-AI Scout <span id="versionDisplay" class="text-xs ml-2 px-2 py-1 bg-gray-100 rounded-full text-gray-500">v3.0.1</span>
-            </h1>
-            <div class='flex space-x-2'>
-                <button onclick="checkForUpdate()" class="text-sm px-3 py-1 bg-blue-100 text-blue-700 rounded-full hover:bg-blue-200 transition duration-150 flex items-center">
-                    <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 0020 13a8 8 0 00-2.583-5.874M16 10V5h-.582m-15.356 2A8.001 8.001 0 004 11a8 8 0 002.583 5.874"></path></svg>
-                    Update
+        <!-- Header and Navigation -->
+        <header class="w-full max-w-lg mb-4 bg-white shadow-lg rounded-xl p-4 border-b-4 border-green-400">
+            <div class="flex justify-between items-center mb-3">
+                <h1 class="text-xl font-extrabold text-green-700 leading-tight">
+                    Kijani-AI Scout <span id="versionDisplay" class="text-xs ml-2 px-2 py-1 bg-gray-100 rounded-full text-gray-500">v4.0.0</span>
+                </h1>
+                <div class='flex space-x-2'>
+                    <button onclick="lockApp()" class="text-sm px-3 py-1 bg-gray-200 text-gray-700 rounded-full hover:bg-gray-300 transition duration-150 flex items-center">
+                        <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
+                        Lock
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Navigation Tabs -->
+            <div class="flex border-t border-gray-200 pt-3">
+                <button id="tabDiagnose" onclick="switchView('diagnose')" class="flex-1 py-2 text-sm font-semibold rounded-t-lg transition duration-150 bg-green-500 text-white">
+                    New Diagnosis
                 </button>
-                <button onclick="lockApp()" class="text-sm px-3 py-1 bg-gray-200 text-gray-700 rounded-full hover:bg-gray-300 transition duration-150 flex items-center">
-                    <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
-                    Lock
+                <button id="tabHistory" onclick="switchView('history')" class="flex-1 py-2 text-sm font-semibold rounded-t-lg transition duration-150 bg-gray-100 text-gray-600 hover:bg-gray-200">
+                    Scouting History
                 </button>
             </div>
         </header>
 
-        <!-- Input Section -->
+        <!-- Main Content Area -->
         <main class="w-full max-w-lg">
-            <div class="bg-white p-6 rounded-xl shadow-xl mb-6">
-                
-                <!-- CRITICAL: API Key Input -->
-                <div class="mb-6 p-4 bg-yellow-50 rounded-lg border-l-4 border-yellow-500">
-                    <label for="apiKeyInput" class="block text-sm font-bold text-gray-700 mb-2">
-                        <span class="text-red-600 font-extrabold">*</span> API Key (Required for Diagnosis):
-                    </label>
-                    <input type="password" id="apiKeyInput" oninput="updateDiagnosisButtonState()" class="w-full p-2 border border-yellow-300 rounded-lg text-sm focus:ring-yellow-500 focus:border-yellow-500" placeholder="Paste your personal Gemini API Key here.">
-                    <p class="text-xs text-gray-500 mt-1">This key enables the AI analysis and is required due to external hosting limitations.</p>
-                </div>
-                
-                
-                <!-- Location & Mapping Section -->
-                <div class="mb-6 border-b pb-4">
-                    <h2 class="text-lg font-bold text-gray-700 mb-3 flex items-center">
-                        <svg class="w-5 h-5 mr-2 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.899c-.781.781-2.047.781-2.828 0L6.343 16.657A8 8 0 1117.657 16.657z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path></svg> 
-                        Location & Mapping (Optional)
-                    </h2>
+            
+            <!-- DIAGNOSIS VIEW -->
+            <div id="viewDiagnose" class="p-4">
+                <div class="bg-white p-6 rounded-xl shadow-xl mb-6">
                     
-                    <!-- GPS Input Fields (Editable) -->
-                    <div class="flex space-x-3 mb-3">
+                    <p id="authStatus" class="text-sm text-center mb-4 p-2 rounded-lg bg-blue-100 text-blue-700 font-semibold"></p>
+
+                    <!-- CRITICAL: API Key Input -->
+                    <div class="mb-6 p-4 bg-yellow-50 rounded-lg border-l-4 border-yellow-500">
+                        <label for="apiKeyInput" class="block text-sm font-bold text-gray-700 mb-2">
+                            <span class="text-red-600 font-extrabold">*</span> API Key (Required for Diagnosis):
+                        </label>
+                        <input type="password" id="apiKeyInput" oninput="updateDiagnosisButtonState()" class="w-full p-2 border border-yellow-300 rounded-lg text-sm focus:ring-yellow-500 focus:border-yellow-500" placeholder="Paste your personal Gemini API Key here.">
+                        <p class="text-xs text-gray-500 mt-1">This key enables the AI analysis and is required due to external hosting limitations.</p>
+                    </div>
+                    
+                    
+                    <!-- Location & Mapping Section -->
+                    <div class="mb-6 border-b pb-4">
+                        <h2 class="text-lg font-bold text-gray-700 mb-3 flex items-center">
+                            <svg class="w-5 h-5 mr-2 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.899c-.781.781-2.047.781-2.828 0L6.343 16.657A8 8 0 1117.657 16.657z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path></svg> 
+                            Location & Mapping (Optional)
+                        </h2>
+                        
+                        <!-- GPS Input Fields (Editable) -->
+                        <div class="flex space-x-3 mb-3">
+                            <input 
+                                type="text" 
+                                id="latitudeInput"
+                                placeholder="Latitude"
+                                class="w-1/2 p-2 border border-gray-300 rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500"
+                            />
+                            <input 
+                                type="text" 
+                                id="longitudeInput"
+                                placeholder="Longitude"
+                                class="w-1/2 p-2 border border-gray-300 rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500"
+                            />
+                        </div>
+
+                        <!-- Get GPS Button -->
+                        <button 
+                            onclick="getGeolocation()" 
+                            id="getLocationButton"
+                            class="w-full px-4 py-2 bg-blue-500 text-white font-semibold rounded-lg shadow-md hover:bg-blue-600 transition duration-150 focus:outline-none focus:ring-4 focus:ring-blue-300 text-sm mb-3 disabled:opacity-50"
+                        >
+                            Get Current GPS
+                        </button>
+
+                        <!-- Mapping Controls -->
+                        <div class="flex space-x-3 items-center">
+                            <button 
+                                onclick="toggleMapping()"
+                                id="mappingButton" 
+                                class="flex-shrink-0 px-4 py-2 bg-yellow-500 text-white font-semibold rounded-lg shadow-md hover:bg-yellow-600 transition duration-150 focus:outline-none focus:ring-4 focus:ring-yellow-300 text-sm"
+                            >
+                                Start Area Mapping
+                            </button>
+                            <div id="mappingStatus" class="flex-grow p-2 bg-gray-100 rounded-lg text-xs text-gray-600 truncate">
+                                Status: Idle. 0 points captured.
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Sensor Data Input -->
+                    <label for="sensorInput" class="block text-sm font-bold text-gray-700 mb-2">Sensor Data (e.g., NPK, pH, Moisture):</label>
+                    <textarea 
+                        id="sensorInput" 
+                        rows="2" 
+                        class="w-full p-3 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500 transition duration-150 shadow-sm mb-4 text-sm" 
+                        placeholder="Paste data: e.g., pH: 5.2, N: 15 ppm, K: 250 ppm, Moisture: 60%"
+                    ></textarea>
+
+                    <!-- Image Upload and Preview -->
+                    <label class="block text-sm font-bold text-gray-700 mb-2">Upload Plant Image (Faster Analysis Optimization):</label>
+                    <div class="mb-4 p-4 border-2 border-dashed border-gray-300 rounded-xl hover:border-green-500 transition duration-150">
                         <input 
-                            type="text" 
-                            id="latitudeInput"
-                            placeholder="Latitude (e.g., -1.2833)"
-                            class="w-1/2 p-2 border border-gray-300 rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500"
+                            type="file" 
+                            id="imageInput" 
+                            accept="image/*" 
+                            onchange="handleImageInput(event)"
+                            class="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-green-50 file:text-green-700 hover:file:bg-green-100"
                         />
-                        <input 
-                            type="text" 
-                            id="longitudeInput"
-                            placeholder="Longitude (e.g., 36.8167)"
-                            class="w-1/2 p-2 border border-gray-300 rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500"
-                        />
+                        <img id="imagePreview" class="mt-4 w-full h-auto max-h-64 object-contain rounded-lg shadow-md hidden" alt="Image Preview">
                     </div>
 
-                    <!-- Get GPS Button -->
+                    <!-- Symptom Description -->
+                    <label for="symptomInput" class="block text-sm font-bold text-gray-700 mb-2">Describe Symptoms:</label>
+                    <textarea 
+                        id="symptomInput" 
+                        rows="3" 
+                        class="w-full p-3 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500 transition duration-150 shadow-sm text-sm" 
+                        placeholder="e.g., Small, yellow-to-orange pustules on the underside of wheat leaves."
+                    ></textarea>
+                    
+                    <!-- Diagnosis Button & Status -->
                     <button 
-                        onclick="getGeolocation()" 
-                        id="getLocationButton"
-                        class="w-full px-4 py-2 bg-blue-500 text-white font-semibold rounded-lg shadow-md hover:bg-blue-600 transition duration-150 focus:outline-none focus:ring-4 focus:ring-blue-300 text-sm mb-3 disabled:opacity-50"
+                        onclick="runDiagnosis()" 
+                        id="diagnoseButton" 
+                        class="mt-6 w-full px-4 py-3 text-white font-bold rounded-xl shadow-lg transition duration-150 focus:outline-none focus:ring-4 focus:ring-yellow-300 disabled:opacity-50 diagnosis-button-waiting"
+                        disabled
                     >
-                        Get Current GPS
+                        Paste API Key to Enable Diagnosis
                     </button>
+                    
+                    <!-- Status Message Display -->
+                    <p id="statusMessage" class="text-sm text-center mt-3 p-2 rounded-lg font-medium"></p>
+                    
+                </div>
 
-                    <!-- Mapping Controls -->
-                    <div class="flex space-x-3 items-center">
-                        <button 
-                            onclick="toggleMapping()"
-                            id="mappingButton" 
-                            class="flex-shrink-0 px-4 py-2 bg-yellow-500 text-white font-semibold rounded-lg shadow-md hover:bg-yellow-600 transition duration-150 focus:outline-none focus:ring-4 focus:ring-yellow-300 text-sm"
-                        >
-                            Start Area Mapping
-                        </button>
-                        <div id="mappingStatus" class="flex-grow p-2 bg-gray-100 rounded-lg text-xs text-gray-600 truncate">
-                            Status: Idle. 0 points captured.
+                <!-- Diagnosis Report Section -->
+                <div id="resultsContainer" class="w-full max-w-lg mt-8 mb-8 hidden">
+                    <div class="bg-white p-6 rounded-xl shadow-2xl border-t-4 border-green-500">
+                        <h2 class="text-2xl font-bold text-gray-800 mb-4 flex justify-between items-center">
+                            Kijani-AI Report
+                            <button id="saveReportButton" onclick="saveDiagnosisReport()" class="px-3 py-1 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700 transition disabled:opacity-50" disabled>
+                                Save Report
+                            </button>
+                        </h2>
+                        <div id="diagnosisOutput">
+                            <!-- Content will be injected here -->
                         </div>
                     </div>
                 </div>
                 
-                <!-- Sensor Data Input -->
-                <label for="sensorInput" class="block text-sm font-bold text-gray-700 mb-2">Sensor Data (e.g., NPK, pH, Moisture):</label>
-                <textarea 
-                    id="sensorInput" 
-                    rows="2" 
-                    class="w-full p-3 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500 transition duration-150 shadow-sm mb-4 text-sm" 
-                    placeholder="Paste data: e.g., pH: 5.2, N: 15 ppm, K: 250 ppm, Moisture: 60%"
-                ></textarea>
-
-                <!-- Image Upload and Preview -->
-                <label class="block text-sm font-bold text-gray-700 mb-2">Upload Plant Image:</label>
-                <div class="mb-4 p-4 border-2 border-dashed border-gray-300 rounded-xl hover:border-green-500 transition duration-150">
-                    <input 
-                        type="file" 
-                        id="imageInput" 
-                        accept="image/*" 
-                        onchange="previewImage(event)"
-                        class="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-green-50 file:text-green-700 hover:file:bg-green-100"
-                    />
-                    <img id="imagePreview" class="mt-4 w-full h-auto max-h-64 object-contain rounded-lg shadow-md hidden" alt="Image Preview">
+                <!-- Loading Indicator -->
+                <div id="loadingIndicator" class="mt-8 hidden p-6 bg-white rounded-xl shadow-lg flex items-center space-x-3 text-gray-600">
+                    <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-green-500"></div>
+                    <span>Analyzing all data streams (Optimized for Speed)...</span>
                 </div>
-
-                <!-- Symptom Description -->
-                <label for="symptomInput" class="block text-sm font-bold text-gray-700 mb-2">Describe Symptoms:</label>
-                <textarea 
-                    id="symptomInput" 
-                    rows="3" 
-                    class="w-full p-3 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500 transition duration-150 shadow-sm text-sm" 
-                    placeholder="e.g., Small, yellow-to-orange pustules on the underside of wheat leaves."
-                ></textarea>
-                
-                <!-- Diagnosis Button & Status -->
-                <button 
-                    onclick="runDiagnosis()" 
-                    id="diagnoseButton" 
-                    class="mt-6 w-full px-4 py-3 text-white font-bold rounded-xl shadow-lg transition duration-150 focus:outline-none focus:ring-4 focus:ring-yellow-300 disabled:opacity-50 diagnosis-button-waiting"
-                    disabled
-                >
-                    Paste API Key to Enable Diagnosis
-                </button>
-                
-                <!-- Status Message Display -->
-                <p id="statusMessage" class="text-sm text-center mt-3 p-2 rounded-lg font-medium"></p>
-                
             </div>
 
-            <!-- Diagnosis Report Section -->
-            <div id="resultsContainer" class="w-full max-w-lg mt-8 mb-8 hidden">
-                <div class="bg-white p-6 rounded-xl shadow-2xl border-t-4 border-green-500">
+            <!-- HISTORY VIEW -->
+            <div id="viewHistory" class="p-4 hidden">
+                <div class="bg-white p-6 rounded-xl shadow-xl">
                     <h2 class="text-2xl font-bold text-gray-800 mb-4">
-                        Kijani-AI Diagnosis Report
+                        Scouting History Log
                     </h2>
-                    <div id="diagnosisOutput">
-                        <!-- Content will be injected here -->
+                    <div id="historyList">
+                        <!-- History items will be injected here -->
+                        <p class="text-gray-500 text-center p-4" id="historyEmptyMessage">Loading history or no reports saved yet...</p>
                     </div>
                 </div>
-            </div>
-            
-            <!-- Loading Indicator -->
-            <div id="loadingIndicator" class="mt-8 hidden p-6 bg-white rounded-xl shadow-lg flex items-center space-x-3 text-gray-600">
-                <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-green-500"></div>
-                <span>Analyzing all data streams...</span>
             </div>
 
         </main>
@@ -223,14 +274,76 @@
 
     <script>
         // --- Configuration and State ---
-        const PIN_KEY = 'kijani_ai_pin_hash_v3';
+        const PIN_KEY = 'kijani_ai_pin_hash_v4';
+        const BIOMETRIC_KEY = 'kijani_ai_biometric_id';
         const API_MODEL = "gemini-2.5-flash-preview-09-2025";
         const MAX_RETRIES = 3;
-        const CURRENT_VERSION = "v3.0.1";
+        const CURRENT_VERSION = "v4.0.0";
 
         let scoutedArea = [];
+        let diagnosisReport = null;
+        let db = null;
+        let auth = null;
+        let userId = null;
+        let isAuthReady = false;
+
+        // --- Firebase Initialization (Global Setup) ---
+        async function initializeFirebase() {
+            if (typeof window.firebaseImports === 'undefined') {
+                console.error("Firebase imports not loaded.");
+                return;
+            }
+
+            const { initializeApp, getAuth, signInWithCustomToken, signInAnonymously, getFirestore, onAuthStateChanged } = window.firebaseImports;
+
+            try {
+                const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                
+                const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+                // 1. Initial Sign In (Custom Token preferred, Anonymous fallback)
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+                
+                // 2. Auth State Listener
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        isAuthReady = true;
+                        document.getElementById('authStatus').textContent = `User ID: ${userId}. Database Ready.`;
+                        console.log("Firebase Auth Ready. User ID:", userId);
+                        // Trigger history load after auth is ready
+                        loadHistory();
+                    } else {
+                        isAuthReady = false;
+                        userId = null;
+                        document.getElementById('authStatus').textContent = `Authentication Pending.`;
+                        console.log("Firebase Auth State Changed: No user logged in.");
+                    }
+                });
+
+            } catch (error) {
+                console.error("Firebase Initialization Failed:", error);
+                document.getElementById('authStatus').textContent = `Auth Error: ${error.message}`;
+            }
+        }
+
 
         // --- Utility Functions ---
+
+        function formatTimestamp(timestamp) {
+            if (timestamp && timestamp.seconds) {
+                const date = new Date(timestamp.seconds * 1000);
+                return date.toLocaleString();
+            }
+            return 'N/A';
+        }
 
         async function sha256(message) {
             const msgBuffer = new TextEncoder().encode(message);
@@ -253,16 +366,87 @@
         function clearStatusMessage() {
             document.getElementById('statusMessage').style.display = 'none';
         }
-
-        // --- PIN Lock Functions (Biosecurity) ---
         
-        function getPinState() {
-            return localStorage.getItem(PIN_KEY) ? 'locked' : 'setup';
+        // --- View Switching ---
+        window.switchView = function(view) {
+            document.getElementById('viewDiagnose').classList.toggle('hidden', view !== 'diagnose');
+            document.getElementById('viewHistory').classList.toggle('hidden', view !== 'history');
+
+            document.getElementById('tabDiagnose').className = view === 'diagnose'
+                ? 'flex-1 py-2 text-sm font-semibold rounded-t-lg transition duration-150 bg-green-500 text-white'
+                : 'flex-1 py-2 text-sm font-semibold rounded-t-lg transition duration-150 bg-gray-100 text-gray-600 hover:bg-gray-200';
+            
+            document.getElementById('tabHistory').className = view === 'history'
+                ? 'flex-1 py-2 text-sm font-semibold rounded-t-lg transition duration-150 bg-green-500 text-white'
+                : 'flex-1 py-2 text-sm font-semibold rounded-t-lg transition duration-150 bg-gray-100 text-gray-600 hover:bg-gray-200';
+            
+            if (view === 'history' && isAuthReady) {
+                loadHistory(); // Re-load history every time
+            }
+        };
+
+
+        // --- Advanced Security (Biometrics/WebAuthn) ---
+
+        function hasBiometricKey() {
+            return localStorage.getItem(BIOMETRIC_KEY) === 'enabled';
         }
 
+        function isWebAuthnSupported() {
+            return window.PublicKeyCredential && navigator.credentials && navigator.credentials.create;
+        }
+
+        function checkLockStatus() {
+            const lockScreen = document.getElementById('lockScreen');
+            const lockTitle = document.getElementById('lockTitle');
+            const lockInstructions = document.getElementById('lockInstructions');
+            const pinButton = document.getElementById('pinButton');
+            const biometricButton = document.getElementById('biometricButton');
+            
+            const pinIsSet = localStorage.getItem(PIN_KEY);
+
+            if (!pinIsSet) {
+                lockScreen.classList.remove('hidden');
+                lockTitle.textContent = "Set Biosecurity PIN";
+                lockInstructions.textContent = "Enter a 4-digit PIN for owner access.";
+                pinButton.textContent = "Set PIN";
+                biometricButton.classList.add('hidden');
+            } else {
+                lockScreen.classList.remove('hidden');
+                lockTitle.textContent = "Access Control";
+                lockInstructions.textContent = "Please enter your 4-digit security PIN.";
+                pinButton.textContent = "Unlock Access (PIN)";
+                
+                if (hasBiometricKey()) {
+                    lockInstructions.textContent = "Use Biometrics for faster access or enter PIN.";
+                    biometricButton.textContent = "Use Biometrics (Faster)";
+                    biometricButton.classList.remove('hidden');
+                } else if (isWebAuthnSupported()) {
+                    lockInstructions.textContent += " You can upgrade to Biometric Access below.";
+                    biometricButton.textContent = "Enable Biometrics";
+                    biometricButton.classList.remove('hidden');
+                    biometricButton.onclick = upgradeToBiometrics;
+                } else {
+                    biometricButton.classList.add('hidden');
+                }
+            }
+        }
+
+        function unlockApp() {
+            document.getElementById('lockScreen').classList.add('opacity-0');
+            setTimeout(() => document.getElementById('lockScreen').classList.add('hidden'), 500);
+            document.getElementById('app').classList.remove('opacity-0');
+            updateDiagnosisButtonState();
+        }
+
+        window.lockApp = function() {
+            document.getElementById('app').classList.add('opacity-0');
+            document.getElementById('lockScreen').classList.remove('hidden', 'opacity-0');
+            checkLockStatus();
+        }
+        
         window.handlePinAction = async function() {
             const pinInput = document.getElementById('pinInput');
-            const pinButton = document.getElementById('pinButton');
             const pinStatus = document.getElementById('pinStatus');
             const pin = pinInput.value;
 
@@ -272,73 +456,493 @@
             }
             pinStatus.textContent = "";
 
-            const currentState = getPinState();
+            const storedHash = localStorage.getItem(PIN_KEY);
             const pinHash = await sha256(pin);
+            pinInput.value = '';
 
-            if (currentState === 'setup') {
+            if (!storedHash) {
+                // Initial setup
                 localStorage.setItem(PIN_KEY, pinHash);
-                pinStatus.textContent = "PIN set successfully!";
+                pinStatus.textContent = "PIN set successfully! You can now enable biometrics.";
                 setTimeout(unlockApp, 500);
-            } else if (currentState === 'locked') {
-                const storedHash = localStorage.getItem(PIN_KEY);
-                if (pinHash === storedHash) {
-                    pinStatus.textContent = "Unlocked! All features enabled.";
-                    setTimeout(unlockApp, 500);
+            } else if (pinHash === storedHash) {
+                // Unlock
+                pinStatus.textContent = "Unlocked! All features enabled.";
+                setTimeout(unlockApp, 500);
+            } else {
+                pinStatus.textContent = "Incorrect PIN. Access Denied (Biosecurity).";
+            }
+        };
+
+        window.attemptBiometricUnlock = async function() {
+            const pinStatus = document.getElementById('pinStatus');
+            pinStatus.textContent = "Attempting Biometric Authentication...";
+            
+            if (!isWebAuthnSupported()) {
+                 pinStatus.textContent = "Biometric access (WebAuthn) not supported by your browser.";
+                 return;
+            }
+
+            try {
+                // This is a simplified WebAuthn authentication flow using a placeholder key
+                // In a real app, you would register a credential and use it here.
+                // For this example, we just check if the biometric prompt succeeds.
+                if (!hasBiometricKey()) {
+                    pinStatus.textContent = "Error: Biometrics not yet registered. Use PIN or click 'Enable Biometrics'.";
+                    return;
+                }
+                
+                const publicKeyCredentialRequestOptions = {
+                    challenge: new Uint8Array(16), // A security challenge (simple for this demo)
+                    timeout: 60000,
+                    rpId: window.location.hostname,
+                    userVerification: 'required',
+                };
+
+                await navigator.credentials.get({ publicKey: publicKeyCredentialRequestOptions });
+
+                pinStatus.textContent = "Biometric success! Unlocked.";
+                setTimeout(unlockApp, 500);
+
+            } catch (error) {
+                pinStatus.textContent = `Biometric failed: ${error.message}. Use PIN instead.`;
+                console.error("Biometric Authentication Error:", error);
+            }
+        };
+        
+        window.upgradeToBiometrics = async function() {
+            const pinStatus = document.getElementById('pinStatus');
+            pinStatus.textContent = "Registering Biometric Credential...";
+            
+            try {
+                // Simplified registration flow
+                const publicKeyCredentialCreationOptions = {
+                    rp: { name: "Kijani AI Scout", id: window.location.hostname },
+                    user: { 
+                        id: new Uint8Array(16), // Use a random ID
+                        name: userId || 'Scout User',
+                        displayName: 'Field Scout'
+                    },
+                    challenge: new Uint8Array(16),
+                    pubKeyCredParams: [{ type: 'public-key', alg: -7 }], // ECDSA with P-256
+                    timeout: 60000,
+                    attestation: 'none',
+                };
+
+                await navigator.credentials.create({ publicKey: publicKeyCredentialCreationOptions });
+
+                localStorage.setItem(BIOMETRIC_KEY, 'enabled');
+                pinStatus.textContent = "Biometric Access Enabled! Use the blue button for faster unlocking.";
+                checkLockStatus(); // Update buttons
+                
+            } catch (error) {
+                pinStatus.textContent = `Biometric Registration Failed: ${error.message}.`;
+                console.error("Biometric Registration Error:", error);
+            }
+        };
+
+
+        // --- Image Handling and Compression (Speed Optimization) ---
+        let compressedBase64Image = null;
+
+        window.handleImageInput = function(event) {
+            const file = event.target.files[0];
+            const preview = document.getElementById('imagePreview');
+            clearStatusMessage();
+            if (file) {
+                preview.src = URL.createObjectURL(file);
+                preview.classList.remove('hidden');
+                
+                // Trigger compression and store compressed Base64
+                compressAndEncodeImage(file);
+            } else {
+                preview.src = '';
+                preview.classList.add('hidden');
+                compressedBase64Image = null;
+            }
+        }
+        
+        // This is the SPEED OPTIMIZATION function
+        function compressAndEncodeImage(file) {
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                const img = new Image();
+                img.onload = function() {
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    
+                    // Target max dimensions
+                    const MAX_WIDTH = 800;
+                    const MAX_HEIGHT = 800;
+                    let width = img.width;
+                    let height = img.height;
+
+                    // Resize logic (to keep aspect ratio and stay within limits)
+                    if (width > height) {
+                        if (width > MAX_WIDTH) {
+                            height *= MAX_WIDTH / width;
+                            width = MAX_WIDTH;
+                        }
+                    } else {
+                        if (height > MAX_HEIGHT) {
+                            width *= MAX_HEIGHT / height;
+                            height = MAX_HEIGHT;
+                        }
+                    }
+
+                    canvas.width = width;
+                    canvas.height = height;
+                    ctx.drawImage(img, 0, 0, width, height);
+                    
+                    // Convert canvas to JPEG (compressing quality to 0.7 for speed)
+                    compressedBase64Image = canvas.toDataURL('image/jpeg', 0.7).split(',')[1];
+                    setStatusMessage(`Image optimized: ${width}x${height}, ready for fast analysis.`);
+
+                };
+                img.src = event.target.result;
+            };
+            reader.readAsDataURL(file);
+        }
+
+        // --- Diagnosis Button State ---
+        window.updateDiagnosisButtonState = function() {
+            const apiKeyInput = document.getElementById('apiKeyInput');
+            const diagnoseButton = document.getElementById('diagnoseButton');
+            const keyIsPresent = apiKeyInput.value.trim().length > 10;
+
+            diagnoseButton.disabled = !keyIsPresent;
+            diagnoseButton.classList.remove('diagnosis-button-ready', 'diagnosis-button-waiting');
+
+            if (keyIsPresent) {
+                diagnoseButton.textContent = 'Run AI Diagnosis';
+                diagnoseButton.classList.add('diagnosis-button-ready');
+            } else {
+                diagnoseButton.textContent = 'Paste API Key to Enable Diagnosis';
+                diagnoseButton.classList.add('diagnosis-button-waiting');
+            }
+        };
+
+        // --- Core runDiagnosis Function ---
+        window.runDiagnosis = async function() {
+            clearStatusMessage();
+            diagnosisReport = null; // Clear previous report
+            document.getElementById('saveReportButton').disabled = true;
+
+            const userApiKey = document.getElementById('apiKeyInput').value.trim();
+            const symptomInput = document.getElementById('symptomInput');
+            const sensorData = document.getElementById('sensorInput').value.trim();
+            const latitude = document.getElementById('latitudeInput').value.trim();
+            const longitude = document.getElementById('longitudeInput').value.trim();
+            
+            const prompt = symptomInput.value.trim();
+            const fileIsPresent = !!document.getElementById('imageInput').files[0];
+
+            if (!userApiKey) {
+                setStatusMessage("CRITICAL: API Key is missing.", true);
+                return;
+            }
+            if (!prompt && !fileIsPresent) {
+                setStatusMessage("Please provide a photo or describe the symptoms (or both).", true);
+                return;
+            }
+            
+            if (fileIsPresent && !compressedBase64Image) {
+                 setStatusMessage("Please wait for the image to finish optimization before running diagnosis.", true);
+                 return;
+            }
+
+            const diagnoseButton = document.getElementById('diagnoseButton');
+            const loadingIndicator = document.getElementById('loadingIndicator');
+            const diagnosisOutput = document.getElementById('diagnosisOutput');
+            const resultsContainer = document.getElementById('resultsContainer');
+
+            diagnoseButton.disabled = true;
+            loadingIndicator.classList.remove('hidden');
+            diagnosisOutput.innerHTML = '';
+            resultsContainer.classList.add('hidden');
+
+            try {
+                const locationData = { lat: latitude, lon: longitude, mapping: scoutedArea, sensorData: sensorData };
+                const resultText = await fetchDiagnosis(prompt, compressedBase64Image, locationData, userApiKey);
+                
+                if (resultText) {
+                    // Store the full report object globally
+                    diagnosisReport = {
+                        prompt: prompt,
+                        sensorData: sensorData,
+                        locationData: locationData,
+                        rawOutput: resultText,
+                        image: compressedBase64Image // Store the compressed image for later viewing/saving
+                    };
+                    
+                    displayDiagnosis(resultText);
+                    resultsContainer.classList.remove('hidden');
+                    document.getElementById('saveReportButton').disabled = !isAuthReady;
+                    setStatusMessage("Diagnosis complete. Report ready to save.");
                 } else {
-                    pinStatus.textContent = "Incorrect PIN. Access Denied (Biosecurity).";
+                    throw new Error("API returned an empty diagnosis result.");
+                }
+
+            } catch (error) {
+                console.error("Diagnosis failed:", error);
+                setStatusMessage(`Analysis Failed: ${error.message}`, true);
+                diagnosisOutput.innerHTML = `<p class="text-red-600 font-bold">Analysis Failed:</p><p class="text-red-500">${error.message}</p><p class="text-gray-500 mt-2">Check your API key validity and network connection.</p>`;
+                resultsContainer.classList.remove('hidden');
+            } finally {
+                diagnoseButton.disabled = false;
+                loadingIndicator.classList.add('hidden');
+                updateDiagnosisButtonState();
+            }
+        };
+
+        // --- LLM API Call Logic (Identical to V3, but uses compressed image) ---
+        async function fetchDiagnosis(prompt, base64Image, locationData, apiKey, attempt = 0) {
+            // apiKey is used here
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${API_MODEL}:generateContent?key=${apiKey}`;
+            
+            const parts = [];
+            let fullPrompt = prompt;
+
+            if (locationData.lat && locationData.lon) {
+                fullPrompt += `\n\nScouting Location: Latitude ${locationData.lat}, Longitude ${locationData.lon}.`;
+            }
+            if (locationData.mapping.length > 0) {
+                fullPrompt += `\n\nArea Boundary: A polygon area containing ${locationData.mapping.length} scouted points has been defined. Adjust recommendations for zone-specific VRA treatment.`;
+            }
+            if (locationData.sensorData) {
+                fullPrompt = `Sensor Data: ${locationData.sensorData}\n\nSymptom Description: ${fullPrompt}`;
+            }
+
+            const SYSTEM_PROMPT = `You are a specialized agricultural diagnosis AI named Kijani-AI, focusing on precision scouting. Analyze ALL provided inputs (Image, Symptom Description, Location/Scouting Data, and Sensor Data). Provide a single, most likely identification, and detail the five key aspects.
+
+            Sensor Data is critical: If a nutrient deficiency is suggested by the visual symptoms, use the provided NPK/pH/Moisture readings to confirm or deny that specific deficiency and adjust your recommendations accordingly.
+
+            Format your response clearly using the following mandatory headings exactly as written (in Markdown): 
+            
+            ### Disease/Organism
+            [Your identified disease name or confirmed nutrient deficiency and the causative agent]
+            
+            ### Effects
+            [List the primary damage and impact on the plant and yield.]
+            
+            ### Causes/Conditions
+            [List the environmental conditions, host factors, or vectors that cause or favor this disease. MUST integrate sensor data confirmation if provided.]
+            
+            ### Recommended Control Measures
+            [Provide specific, practical, and grounded recommendations for immediate management and control.]
+            
+            ### Broader Agricultural Practices
+            [Provide general, preventative, and long-term farm management practices.]`;
+
+            parts.push({ text: fullPrompt });
+            
+            if (base64Image) {
+                parts.push({
+                    inlineData: {
+                        mimeType: 'image/jpeg', 
+                        data: base64Image
+                    }
+                });
+            }
+
+            const payload = {
+                contents: [{ role: "user", parts: parts }],
+                tools: [{ "google_search": {} }],
+                systemInstruction: {
+                    parts: [{ text: SYSTEM_PROMPT }]
+                },
+            };
+
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                if (!response.ok) {
+                    let errorDetails = `HTTP Status ${response.status} (${response.statusText})`;
+                    if (response.status === 403 || response.status === 400) {
+                        errorDetails += " - Authorization Failed. (Check API key validity).";
+                    }
+                    throw new Error(`API Error: ${errorDetails}`);
+                }
+
+                const result = await response.json();
+                const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
+
+                if (!text) {
+                    throw new Error("API response was valid but contained no generated text.");
+                }
+
+                return text;
+
+            } catch (error) {
+                if (attempt < MAX_RETRIES - 1) {
+                    const delay = Math.pow(2, attempt) * 1000 + Math.random() * 500;
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    return fetchDiagnosis(prompt, base64Image, locationData, apiKey, attempt + 1); 
+                } else {
+                    throw error;
                 }
             }
-            pinInput.value = '';
-        };
+        }
 
-        function checkLockStatus() {
-            const lockScreen = document.getElementById('lockScreen');
-            const lockTitle = document.getElementById('lockTitle');
-            const lockInstructions = document.getElementById('lockInstructions');
-            const pinButton = document.getElementById('pinButton');
+        // --- Display Logic ---
+        function displayDiagnosis(markdownText) {
+            const diagnosisOutput = document.getElementById('diagnosisOutput');
+            // This relies on the CSS styling above to format the markdown output
+            let htmlContent = markdownText
+                .replace(/^### (.*)$/gm, '<h3>$1</h3>')
+                .replace(/^\* (.*)$/gm, '<li>$1</li>')
+                .replace(/\n\n/g, '</p><p>')
+                .replace(/\n/g, ' ');
+
+            // Basic list wrapping
+            htmlContent = htmlContent.replace(/<li>/g, '<ul><li>').replace(/<\/li>/g, '</li></ul>').replace(/<\/ul>\s*<ul>/g, '');
+            // Wrap in an initial paragraph
+            htmlContent = `<p>${htmlContent}</p>`;
             
-            if (getPinState() === 'setup') {
-                lockScreen.classList.remove('hidden');
-                lockTitle.textContent = "Set Biosecurity PIN";
-                lockInstructions.textContent = "Enter a 4-digit PIN for owner access.";
-                pinButton.textContent = "Set PIN";
-            } else {
-                lockScreen.classList.remove('hidden');
-                lockTitle.textContent = "Access Control";
-                lockInstructions.textContent = "Please enter your 4-digit security PIN.";
-                pinButton.textContent = "Unlock Access";
+            diagnosisOutput.innerHTML = htmlContent;
+        }
+
+
+        // --- Firestore Integration (Data Persistence) ---
+        
+        window.saveDiagnosisReport = async function() {
+            if (!diagnosisReport || !isAuthReady) {
+                setStatusMessage("Cannot save: Report is missing or database not ready.", true);
+                return;
             }
-        }
-
-        function unlockApp() {
-            document.getElementById('lockScreen').classList.add('opacity-0');
-            setTimeout(() => document.getElementById('lockScreen').classList.add('hidden'), 500);
-            document.getElementById('app').classList.remove('opacity-0');
             
-            // Check API key status immediately after unlocking
-            updateDiagnosisButtonState();
-        }
+            document.getElementById('saveReportButton').disabled = true;
+            setStatusMessage("Saving report to secured database...");
 
-        window.lockApp = function() {
-            document.getElementById('app').classList.add('opacity-0');
-            document.getElementById('lockScreen').classList.remove('hidden', 'opacity-0');
-            checkLockStatus();
-        }
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+            const collectionPath = `artifacts/${appId}/users/${userId}/reports`;
 
-        // --- Version Check ---
-        window.checkForUpdate = function() {
-            clearStatusMessage();
-            const loadingIndicator = document.getElementById('loadingIndicator');
-            loadingIndicator.classList.remove('hidden');
+            try {
+                const { addDoc, collection, serverTimestamp } = window.firebaseImports;
+                
+                // Prepare document (use JSON.stringify for complex objects if needed, but not here)
+                const reportDoc = {
+                    ...diagnosisReport,
+                    timestamp: serverTimestamp(),
+                    userId: userId,
+                    // Only save the compressed Base64 image
+                    image: diagnosisReport.image, 
+                    // Save markdown to load in history
+                    rawOutput: diagnosisReport.rawOutput 
+                };
 
-            setTimeout(() => {
-                loadingIndicator.classList.add('hidden');
-                setStatusMessage(`Kijani-AI is running the latest version: ${CURRENT_VERSION}`);
-            }, 1500);
+                await addDoc(collection(db, collectionPath), reportDoc);
+                setStatusMessage("Report successfully saved!", false);
+                
+            } catch (error) {
+                console.error("Error saving document:", error);
+                setStatusMessage(`Save Failed: ${error.message}. Check console for details.`, true);
+            } finally {
+                document.getElementById('saveReportButton').disabled = false;
+            }
         };
+
+
+        function loadHistory() {
+            if (!isAuthReady || !db) return;
+
+            const historyList = document.getElementById('historyList');
+            const historyEmptyMessage = document.getElementById('historyEmptyMessage');
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+            const collectionPath = `artifacts/${appId}/users/${userId}/reports`;
+
+            historyEmptyMessage.textContent = "Loading reports...";
+
+            const { onSnapshot, collection, query } = window.firebaseImports;
+            
+            // Real-time listener for the user's reports collection
+            onSnapshot(query(collection(db, collectionPath)), (snapshot) => {
+                const reports = [];
+                snapshot.forEach(doc => {
+                    reports.push({ id: doc.id, ...doc.data() });
+                });
+                
+                // Sort by timestamp descending (newest first). Firestore timestamp is not a JS date yet.
+                reports.sort((a, b) => b.timestamp?.seconds - a.timestamp?.seconds);
+
+                historyList.innerHTML = '';
+                
+                if (reports.length === 0) {
+                    historyList.innerHTML = '<p class="text-gray-500 text-center p-4">No reports saved yet. Run a diagnosis and click "Save Report"!</p>';
+                } else {
+                    reports.forEach(report => {
+                        const date = formatTimestamp(report.timestamp);
+                        const reportEl = document.createElement('div');
+                        reportEl.className = 'history-item bg-gray-50 p-4 rounded-lg shadow-sm border border-gray-200 mb-3';
+                        reportEl.innerHTML = `
+                            <p class="text-sm font-bold text-green-700">${report.rawOutput.match(/^### Disease\/Organism\s*\[(.*?)\]/im)?.[1] || 'Diagnosis Report'}</p>
+                            <p class="text-xs text-gray-500 mt-1">Date: ${date}</p>
+                            <p class="text-xs text-gray-500">Location: ${report.locationData.lat || 'N/A'}, ${report.locationData.lon || 'N/A'}</p>
+                            <button onclick="viewReportDetails('${report.id}')" class="mt-2 text-xs font-semibold text-blue-600 hover:text-blue-800">View Details</button>
+                        `;
+                        historyList.appendChild(reportEl);
+                    });
+                    // Store reports globally for detailed viewing
+                    window.allReports = reports.reduce((acc, report) => {
+                        acc[report.id] = report;
+                        return acc;
+                    }, {});
+                }
+            }, (error) => {
+                console.error("Firestore history listener error:", error);
+                historyList.innerHTML = `<p class="text-red-500 text-center p-4">Error loading history: ${error.message}</p>`;
+            });
+        }
         
-        // --- Geolocation and Mapping Functions ---
-        
+        window.viewReportDetails = function(reportId) {
+            const report = window.allReports[reportId];
+            if (!report) return;
+
+            // Switch to diagnose view to show the report output
+            switchView('diagnose');
+            document.getElementById('resultsContainer').classList.remove('hidden');
+            
+            // Display the markdown content
+            displayDiagnosis(report.rawOutput);
+            
+            // Update input fields for context
+            document.getElementById('symptomInput').value = report.prompt || '';
+            document.getElementById('sensorInput').value = report.sensorData || '';
+            document.getElementById('latitudeInput').value = report.locationData.lat || '';
+            document.getElementById('longitudeInput').value = report.locationData.lon || '';
+
+            // Display saved image
+            const preview = document.getElementById('imagePreview');
+            if (report.image) {
+                preview.src = `data:image/jpeg;base64,${report.image}`;
+                preview.classList.remove('hidden');
+            } else {
+                preview.src = '';
+                preview.classList.add('hidden');
+            }
+            
+            setStatusMessage(`Loaded previous report from ${formatTimestamp(report.timestamp)}.`, false);
+            document.getElementById('saveReportButton').disabled = true; // Cannot re-save history item
+        };
+
+
+        // Initialize on load
+        window.onload = function() {
+            document.getElementById('versionDisplay').textContent = CURRENT_VERSION;
+            checkLockStatus();
+            clearStatusMessage();
+            initializeFirebase(); // Start database initialization
+            
+            // Re-initialize GPS status
+            window.isMapping = false;
+            updateMappingStatus();
+        };
+
+        // GPS and Mapping functions (copied from V3 to keep them working)
         function updateMappingStatus() {
             const mappingButton = document.getElementById('mappingButton');
             const mappingStatus = document.getElementById('mappingStatus');
@@ -424,242 +1028,9 @@
                 maximumAge: 0
             });
         };
-
-        // --- Image Handling Functions ---
-        window.previewImage = function(event) {
-            const file = event.target.files[0];
-            const preview = document.getElementById('imagePreview');
-            clearStatusMessage();
-            if (file) {
-                preview.src = URL.createObjectURL(file);
-                preview.classList.remove('hidden');
-            } else {
-                preview.src = '';
-                preview.classList.add('hidden');
-            }
-        }
         
-        function fileToBase64(file) {
-            return new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onload = () => {
-                    // 8MB limit (safe buffer for API)
-                    if (file.size > 8 * 1024 * 1024) { 
-                        reject(new Error("Image is too large (over 8MB). Please upload a compressed image."));
-                    }
-                    const base64String = reader.result.split(',')[1];
-                    resolve(base64String);
-                };
-                reader.onerror = error => reject(error);
-                reader.readAsDataURL(file);
-            });
-        }
-        
-        // --- Diagnosis Button State ---
-        window.updateDiagnosisButtonState = function() {
-            const apiKeyInput = document.getElementById('apiKeyInput');
-            const diagnoseButton = document.getElementById('diagnoseButton');
-            const keyIsPresent = apiKeyInput.value.trim().length > 10; // Simple check for presence
-
-            diagnoseButton.disabled = !keyIsPresent;
-            diagnoseButton.classList.remove('diagnosis-button-ready', 'diagnosis-button-waiting');
-
-            if (keyIsPresent) {
-                diagnoseButton.textContent = 'Run AI Diagnosis';
-                diagnoseButton.classList.add('diagnosis-button-ready');
-            } else {
-                diagnoseButton.textContent = 'Paste API Key to Enable Diagnosis';
-                diagnoseButton.classList.add('diagnosis-button-waiting');
-            }
-        };
-
-
-        // --- Core runDiagnosis Function (Uses User-Provided Key) ---
-        window.runDiagnosis = async function() {
-            clearStatusMessage();
-            const apiKeyInput = document.getElementById('apiKeyInput');
-            const userApiKey = apiKeyInput.value.trim();
-            
-            const symptomInput = document.getElementById('symptomInput');
-            const imageInput = document.getElementById('imageInput');
-            const sensorData = document.getElementById('sensorInput').value.trim();
-            const latitude = document.getElementById('latitudeInput').value.trim();
-            const longitude = document.getElementById('longitudeInput').value.trim();
-            
-            const prompt = symptomInput.value.trim();
-            const file = imageInput.files[0];
-
-            if (!userApiKey) {
-                setStatusMessage("CRITICAL: API Key is missing. Please paste your Gemini key to enable diagnosis.", true);
-                return;
-            }
-            if (!prompt && !file) {
-                setStatusMessage("Please provide a photo or describe the symptoms (or both).", true);
-                return;
-            }
-            
-            const diagnoseButton = document.getElementById('diagnoseButton');
-            const loadingIndicator = document.getElementById('loadingIndicator');
-            const diagnosisOutput = document.getElementById('diagnosisOutput');
-            const resultsContainer = document.getElementById('resultsContainer');
-
-            diagnoseButton.disabled = true;
-            loadingIndicator.classList.remove('hidden');
-            diagnosisOutput.innerHTML = '';
-            resultsContainer.classList.add('hidden');
-
-            try {
-                let base64Image = null;
-                if (file) {
-                    setStatusMessage('Uploading and preparing image...');
-                    base64Image = await fileToBase64(file);
-                }
-                
-                setStatusMessage('Analyzing all data streams...');
-                
-                const locationData = { lat: latitude, lon: longitude, mapping: scoutedArea, sensorData: sensorData };
-                const resultText = await fetchDiagnosis(prompt, base64Image, locationData, userApiKey);
-                
-                if (resultText) {
-                    displayDiagnosis(resultText);
-                    resultsContainer.classList.remove('hidden');
-                    setStatusMessage("Diagnosis complete. See report below.");
-                } else {
-                    throw new Error("API returned an empty diagnosis result.");
-                }
-
-            } catch (error) {
-                console.error("Diagnosis failed:", error);
-                setStatusMessage(`Analysis Failed: ${error.message}`, true);
-                diagnosisOutput.innerHTML = `<p class="text-red-600 font-bold">Analysis Failed:</p><p class="text-red-500">${error.message}</p><p class="text-gray-500 mt-2">Check your API key validity and network connection.</p>`;
-                resultsContainer.classList.remove('hidden');
-            } finally {
-                diagnoseButton.disabled = false;
-                loadingIndicator.classList.add('hidden');
-                updateDiagnosisButtonState(); // Re-enable if key is still present
-            }
-        };
-
-        // --- LLM API Call Logic (Now uses user key) ---
-        async function fetchDiagnosis(prompt, base64Image, locationData, apiKey, attempt = 0) {
-            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${API_MODEL}:generateContent?key=${apiKey}`;
-            
-            const parts = [];
-            let fullPrompt = prompt;
-
-            // 1. Add location and scouting context to the prompt
-            if (locationData.lat && locationData.lon) {
-                fullPrompt += `\n\nScouting Location: Latitude ${locationData.lat}, Longitude ${locationData.lon}.`;
-            }
-            if (locationData.mapping.length > 0) {
-                fullPrompt += `\n\nArea Boundary: A polygon area containing ${locationData.mapping.length} scouted points has been defined. Adjust recommendations for zone-specific VRA treatment.`;
-            }
-            if (locationData.sensorData) {
-                fullPrompt = `Sensor Data: ${locationData.sensorData}\n\nSymptom Description: ${fullPrompt}`;
-            }
-
-            const SYSTEM_PROMPT = `You are a specialized agricultural diagnosis AI named Kijani-AI, focusing on precision scouting. Analyze ALL provided inputs (Image, Symptom Description, Location/Scouting Data, and Sensor Data). Provide a single, most likely identification, and detail the five key aspects.
-
-            Sensor Data is critical: If a nutrient deficiency is suggested by the visual symptoms, use the provided NPK/pH/Moisture readings to confirm or deny that specific deficiency and adjust your recommendations accordingly.
-
-            Format your response clearly using the following mandatory headings exactly as written (in Markdown): 
-            
-            ### Disease/Organism
-            [Your identified disease name or confirmed nutrient deficiency and the causative agent]
-            
-            ### Effects
-            [List the primary damage and impact on the plant and yield.]
-            
-            ### Causes/Conditions
-            [List the environmental conditions, host factors, or vectors that cause or favor this disease. MUST integrate sensor data confirmation if provided.]
-            
-            ### Recommended Control Measures
-            [Provide specific, practical, and grounded recommendations for immediate management and control.]
-            
-            ### Broader Agricultural Practices
-            [Provide general, preventative, and long-term farm management practices.]`;
-
-            parts.push({ text: fullPrompt });
-            
-            if (base64Image) {
-                parts.push({
-                    inlineData: {
-                        mimeType: 'image/jpeg', 
-                        data: base64Image
-                    }
-                });
-            }
-
-            const payload = {
-                contents: [{ role: "user", parts: parts }],
-                tools: [{ "google_search": {} }],
-                systemInstruction: {
-                    parts: [{ text: SYSTEM_PROMPT }]
-                },
-            };
-
-            try {
-                const response = await fetch(apiUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-                
-                if (!response.ok) {
-                    let errorDetails = `HTTP Status ${response.status} (${response.statusText})`;
-                    if (response.status === 403 || response.status === 400) {
-                        // This error should now only occur if the API key itself is wrong.
-                        errorDetails += " - Authorization Failed. (Check API key validity).";
-                    }
-                    throw new Error(`API Error: ${errorDetails}`);
-                }
-
-                const result = await response.json();
-                const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
-
-                if (!text) {
-                    throw new Error("API response was valid but contained no generated text.");
-                }
-
-                return text;
-
-            } catch (error) {
-                if (attempt < MAX_RETRIES - 1) {
-                    const delay = Math.pow(2, attempt) * 1000 + Math.random() * 500;
-                    await new Promise(resolve => setTimeout(resolve, delay));
-                    return fetchDiagnosis(prompt, base64Image, locationData, apiKey, attempt + 1); 
-                } else {
-                    throw error;
-                }
-            }
-        }
-
-        // --- Display Logic ---
-        function displayDiagnosis(markdownText) {
-            const diagnosisOutput = document.getElementById('diagnosisOutput');
-            // This relies on the CSS styling above to format the markdown output
-            let htmlContent = markdownText
-                .replace(/^### (.*)$/gm, '<h3>$1</h3>')
-                .replace(/^\* (.*)$/gm, '<li>$1</li>')
-                .replace(/\n\n/g, '</p><p>')
-                .replace(/\n/g, ' ');
-
-            // Basic list wrapping
-            htmlContent = htmlContent.replace(/<li>/g, '<ul><li>').replace(/<\/li>/g, '</li></ul>').replace(/<\/ul>\s*<ul>/g, '');
-            // Wrap in an initial paragraph
-            htmlContent = `<p>${htmlContent}</p>`;
-            
-            diagnosisOutput.innerHTML = htmlContent;
-        }
-
-        // Initialize on load
-        window.onload = function() {
-            document.getElementById('versionDisplay').textContent = CURRENT_VERSION;
-            checkLockStatus();
-            clearStatusMessage();
-        };
-
     </script>
 </body>
 </html>
+
 
